@@ -1,0 +1,79 @@
+name: Publish GENESIS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build browser application
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Build browser application
+        run: npm run build:web
+
+      - name: Check application entry point
+        run: test -s dist-web/index.html
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist-web
+
+  deploy:
+    name: Publish browser link
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Configure GitHub Pages
+        id: pages
+        uses: actions/configure-pages@v5
+        with:
+          # One-time prerequisite: Repository Settings > Pages >
+          # Build and deployment > Source = GitHub Actions.
+          # GITHUB_TOKEN deploys an enabled site; it cannot activate one.
+          # Admin-authenticated API alternative: POST /repos/{owner}/{repo}/pages
+          # with {"build_type":"workflow"}. No extra token is needed here.
+          enablement: false
+
+      - name: Deploy GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+      - name: Explain Pages activation requirement
+        if: failure() && steps.pages.outcome == 'failure'
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'PAGES'
+          GitHub Pages must be enabled for this repository before the built-in workflow token can publish it.
+
+          Open **Repository Settings → Pages → Build and deployment → Source**, choose **GitHub Actions**, then rerun this workflow.
+          The application artifact was built successfully and remains available in this run.
+          PAGES
